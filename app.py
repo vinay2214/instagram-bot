@@ -93,7 +93,7 @@ def generate_ai_reply(user_text):
         """
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-1.5-flash-002,
             contents=prompt
         )
 
