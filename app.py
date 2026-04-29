@@ -5,7 +5,7 @@ from google import genai
 
 app = Flask(__name__)
 
-# 🔐 ENV VARIABLES (set in Render)
+# 🔐 ENV VARIABLES (Render)
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -19,7 +19,7 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 processed_comments = set()
 
 
-# 🔹 Home route (Render health check)
+# 🔹 Home route
 @app.route("/")
 def home():
     return "Gemini AI Bot Running 🚀"
@@ -31,6 +31,25 @@ def verify():
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
         return request.args.get("hub.challenge")
     return "Verification failed", 403
+
+
+# 🔹 Get post caption
+def get_post_caption(media_id):
+    try:
+        url = f"https://graph.facebook.com/v19.0/{media_id}"
+        params = {
+            "fields": "caption",
+            "access_token": ACCESS_TOKEN
+        }
+
+        res = requests.get(url, params=params)
+        data = res.json()
+
+        return data.get("caption", "")
+
+    except Exception as e:
+        print("Caption fetch error:", e)
+        return ""
 
 
 # 🔹 Webhook handler
@@ -49,6 +68,7 @@ def webhook():
                     text = value.get("text", "")
                     username = value.get("from", {}).get("username")
                     parent_id = value.get("parent_id")
+                    media_id = value.get("media", {}).get("id")
 
                     print(f"💬 Comment: {text} | User: {username}")
 
@@ -56,7 +76,7 @@ def webhook():
                     if username == MY_USERNAME:
                         continue
 
-                    # 🚫 Skip replies (only respond to main comments)
+                    # 🚫 Skip replies
                     if parent_id and parent_id != comment_id:
                         continue
 
@@ -66,8 +86,13 @@ def webhook():
 
                     processed_comments.add(comment_id)
 
+                    # 🧠 Get post caption
+                    caption = get_post_caption(media_id)
+
+                    print("📌 Caption:", caption)
+
                     # 🤖 Generate AI reply
-                    reply = generate_ai_reply(text)
+                    reply = generate_ai_reply(text, caption)
 
                     # 📤 Send reply
                     reply_to_comment(comment_id, reply)
@@ -78,18 +103,25 @@ def webhook():
     return "ok", 200
 
 
-# 🤖 Gemini AI reply generator
-def generate_ai_reply(user_text):
+# 🤖 Gemini AI reply (context-aware)
+def generate_ai_reply(user_text, caption):
     try:
         prompt = f"""
         You are a friendly Instagram creator.
 
-        Reply to this comment in a short, engaging, human-like way.
-        Use emojis.
-        Keep it under 1-2 lines.
-        Encourage engagement or follow naturally.
+        POST CAPTION:
+        {caption}
 
-        Comment: {user_text}
+        USER COMMENT:
+        {user_text}
+
+        Write a short, human-like reply (1-2 lines):
+        - Understand the post context
+        - Use emojis
+        - Sound natural (not robotic)
+        - Slightly encourage engagement or follow
+
+        Reply:
         """
 
         response = client.models.generate_content(
@@ -104,7 +136,7 @@ def generate_ai_reply(user_text):
         return "Thanks 🙌🔥"
 
 
-# 📤 Reply to Instagram comment
+# 📤 Reply to comment
 def reply_to_comment(comment_id, message):
     url = f"https://graph.facebook.com/v19.0/{comment_id}/replies"
 
@@ -117,18 +149,17 @@ def reply_to_comment(comment_id, message):
     print("📤 Reply Response:", res.text)
 
 
-# 🚀 Run (Render compatible)
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-
+# 🔹 Optional: check models (debug)
 @app.route("/models")
 def list_models():
     try:
         models = client.models.list()
-        result = []
-        for m in models:
-            result.append(m.name)
-        return {"models": result}
+        return {"models": [m.name for m in models]}
     except Exception as e:
         return {"error": str(e)}
+
+
+# 🚀 Run
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
