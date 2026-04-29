@@ -1,37 +1,39 @@
 from flask import Flask, request
 import requests
 import os
-import google.generativeai as genai
+from google import genai
 
 app = Flask(__name__)
 
-ACCESS_TOKEN = "EAAL7JziZAf9YBRZAbzTz5DWDEgK5JLZBhpKaFD9CnAgx1sYpkNOGRyvZB4vucZBHzZCQfY53mNriMaFi0GjRKtyTN7TWnzJT8E8I0ZC44jOCZCZC9kcPEXrTOZASZBbsut2BANk3m3HJJAGTL9LoYKUSBZAOYjZCU1KMu1uPnTr1gegVqSqeM3M1cXPdZCDu8hsJ9OIoKzrgt4s515zTVzbZAKbxVF5GxcSjbZCTC3oLsYB8pGCg5tWVF2izeR3T67ItQ5pR4FDmrZCdZA4knvkZCrLk9e70S7TOQZDZD"
-VERIFY_TOKEN = "vinay2022"
+# 🔐 ENV VARIABLES (set in Render)
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 MY_USERNAME = "vsingh_rides"
 
-# 🔐 Gemini setup
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# 🤖 Gemini client
+client = genai.Client(api_key=GEMINI_API_KEY)
 
-model = genai.GenerativeModel("gemini-1.5-flash")
-
+# 🧠 Prevent duplicate replies
 processed_comments = set()
 
 
-# 🔹 Home
+# 🔹 Home route (Render health check)
 @app.route("/")
 def home():
-    return "Gemini Bot Running 🚀"
+    return "Gemini AI Bot Running 🚀"
 
 
-# 🔹 Verify webhook
+# 🔹 Webhook verification
 @app.route("/webhook", methods=["GET"])
 def verify():
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
         return request.args.get("hub.challenge")
-    return "Error", 403
+    return "Verification failed", 403
 
 
-# 🔹 Webhook
+# 🔹 Webhook handler
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
@@ -48,25 +50,26 @@ def webhook():
                     username = value.get("from", {}).get("username")
                     parent_id = value.get("parent_id")
 
-                    print(f"💬 {text} | {username}")
+                    print(f"💬 Comment: {text} | User: {username}")
 
                     # 🚫 Skip own comments
                     if username == MY_USERNAME:
                         continue
 
-                    # 🚫 Skip replies
+                    # 🚫 Skip replies (only respond to main comments)
                     if parent_id and parent_id != comment_id:
                         continue
 
-                    # 🚫 Skip duplicates
+                    # 🚫 Avoid duplicate replies
                     if comment_id in processed_comments:
                         continue
 
                     processed_comments.add(comment_id)
 
-                    # 🤖 Gemini reply
+                    # 🤖 Generate AI reply
                     reply = generate_ai_reply(text)
 
+                    # 📤 Send reply
                     reply_to_comment(comment_id, reply)
 
     except Exception as e:
@@ -75,19 +78,24 @@ def webhook():
     return "ok", 200
 
 
-# 🤖 Gemini AI reply
+# 🤖 Gemini AI reply generator
 def generate_ai_reply(user_text):
     try:
         prompt = f"""
         You are a friendly Instagram creator.
+
         Reply to this comment in a short, engaging, human-like way.
-        Use emojis and keep it under 1-2 lines.
-        Encourage engagement naturally.
+        Use emojis.
+        Keep it under 1-2 lines.
+        Encourage engagement or follow naturally.
 
         Comment: {user_text}
         """
 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
 
         return response.text.strip()
 
@@ -96,19 +104,20 @@ def generate_ai_reply(user_text):
         return "Thanks 🙌🔥"
 
 
-# 🔹 Reply to comment
+# 📤 Reply to Instagram comment
 def reply_to_comment(comment_id, message):
     url = f"https://graph.facebook.com/v19.0/{comment_id}/replies"
 
-    res = requests.post(url, data={
+    payload = {
         "message": message,
         "access_token": ACCESS_TOKEN
-    })
+    }
 
-    print("📤 Reply:", res.text)
+    res = requests.post(url, data=payload)
+    print("📤 Reply Response:", res.text)
 
 
-# 🔹 Run (Render compatible)
+# 🚀 Run (Render compatible)
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
